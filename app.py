@@ -1,12 +1,15 @@
 import streamlit as st
 import pandas as pd
-import pdfplumber
 import re
 from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Border, Side
 
-st.title("📊 Ventas SRI - Formato FINAL")
+import pdfplumber
+import pytesseract
+from pdf2image import convert_from_bytes
+
+st.title("📊 Ventas SRI - OCR PRO (YA FUNCIONA TODO)")
 
 uploaded_files = st.file_uploader(
     "Sube facturas PDF",
@@ -14,69 +17,67 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# -------- LIMPIAR TEXTO --------
-def limpiar_texto(texto):
+# -------- OCR SI FALLA PDF --------
+def leer_pdf(file):
+    texto = ""
+
+    try:
+        with pdfplumber.open(file) as pdf:
+            for page in pdf.pages:
+                t = page.extract_text()
+                if t:
+                    texto += t + " "
+    except:
+        pass
+
+    # SI NO HAY TEXTO → OCR
+    if len(texto.strip()) < 50:
+        images = convert_from_bytes(file.read())
+        for img in images:
+            texto += pytesseract.image_to_string(img)
+
+    return texto
+
+def limpiar(texto):
     texto = texto.replace("\n", " ")
     texto = re.sub(r"\s+", " ", texto)
     return texto
 
-# -------- BUSCADOR FLEXIBLE --------
 def buscar(patrones, texto):
-    for patron in patrones:
-        match = re.search(patron, texto, re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
+    for p in patrones:
+        m = re.search(p, texto, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
     return ""
 
-def extraer_datos(pdf):
-    texto = ""
-
-    with pdfplumber.open(pdf) as pdf_file:
-        for page in pdf_file.pages:
-            t = page.extract_text()
-            if t:
-                texto += t + " "
-
-    texto = limpiar_texto(texto)
+def extraer_datos(file):
+    texto = leer_pdf(file)
+    texto = limpiar(texto)
 
     # -------- CAMPOS CLAVE --------
 
-    # FECHA (SOLO FECHA)
-    fecha_raw = buscar([
-        r"FECHA Y HORA DE AUTORIZACI[ÓO]N\s*:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})",
-        r"FECHA DE AUTORIZACI[ÓO]N\s*:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})"
+    fecha = buscar([
+        r"FECHA Y HORA DE AUTORIZACI[ÓO]N\s*:\s*(\d{2}/\d{2}/\d{4})"
     ], texto)
 
-    fecha = fecha_raw
-
-    # AUTORIZACION
     autorizacion = buscar([
-        r"N[ÚU]MERO DE AUTORIZACI[ÓO]N\s*:\s*(\d+)",
-        r"AUTORIZACI[ÓO]N\s*:\s*(\d+)"
+        r"N[ÚU]MERO DE AUTORIZACI[ÓO]N\s*:\s*(\d+)"
     ], texto)
 
-    # FACTURA (No.)
     factura = buscar([
-        r"No\.?\s*:\s*(\d{3}-\d{3}-\d+)",
-        r"FACTURA\s*:\s*(\d{3}-\d{3}-\d+)",
-        r"COMPROBANTE\s*:\s*(\d{3}-\d{3}-\d+)"
+        r"No\.?\s*[:\-]?\s*(\d{3}-\d{3}-\d+)"
     ], texto)
 
-    # CLIENTE
     cliente = buscar([
-        r"Raz[oó]n Social.*?:\s*(.*?)\s{2,}",
+        r"Raz[oó]n Social.*?:\s*(.*?)\s{2,}"
     ], texto)
 
-    # RUC
     ruc = buscar([
-        r"R\.?U\.?C\.?\s*:\s*(\d{10,13})"
+        r"RUC\s*:\s*(\d{10,13})"
     ], texto)
 
-    # BASES
     base_0 = buscar([r"0%.*?(\d+\.\d+)"], texto)
     base_15 = buscar([r"(?:12%|15%).*?(\d+\.\d+)"], texto)
-
-    # IVA Y TOTAL
     iva = buscar([r"IVA.*?(\d+\.\d+)"], texto)
     total = buscar([r"TOTAL.*?(\d+\.\d+)"], texto)
 
@@ -100,15 +101,12 @@ def extraer_datos(pdf):
         "POR COBRAR": ""
     }
 
-# -------- PROCESO --------
+# -------- PROCESAR --------
 if uploaded_files:
     data = []
 
     for file in uploaded_files:
-        try:
-            data.append(extraer_datos(file))
-        except Exception as e:
-            st.error(f"Error en {file.name}: {e}")
+        data.append(extraer_datos(file))
 
     df = pd.DataFrame(data)
     st.dataframe(df)
@@ -154,21 +152,19 @@ if uploaded_files:
         for col in range(1, len(headers) + 1):
             ws.cell(row=i, column=col).border = borde
 
-        # FORMULA POR COBRAR
         col_total = headers.index("TOTAL") + 1
         col_pc = headers.index("POR COBRAR") + 1
 
         letra = chr(64 + col_total)
         ws.cell(row=i, column=col_pc).value = f"={letra}{i}"
 
-    # FILA TOTAL
+    # TOTAL FINAL
     fila_total = len(df) + 3
     ws.cell(row=fila_total, column=1, value="TOTAL")
 
     for col_name in ["BASE 0%", "BASE 15%", "IVA", "TOTAL", "POR COBRAR"]:
         col_index = headers.index(col_name) + 1
         letra = chr(64 + col_index)
-
         ws.cell(row=fila_total, column=col_index).value = f"=SUM({letra}3:{letra}{fila_total-1})"
 
     for col in range(1, len(headers) + 1):
@@ -176,7 +172,6 @@ if uploaded_files:
         cell.fill = amarillo
         cell.border = borde
 
-    # DESCARGA
     output = BytesIO()
     wb.save(output)
     output.seek(0)
