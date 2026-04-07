@@ -25,13 +25,19 @@ def limpiar_numero(texto):
     except:
         return 0
 
-# -------- BUSCAR --------
+# -------- BUSCAR SEGURO --------
 def buscar(patron, texto):
     match = re.search(patron, texto, re.IGNORECASE)
-    return match.group(1).strip() if match else ""
+    if match:
+        if match.lastindex:
+            return match.group(match.lastindex).strip()
+        return match.group(0).strip()
+    return ""
 
-# -------- FECHA --------
+# -------- LIMPIAR FECHA --------
 def limpiar_fecha(texto):
+    if not texto:
+        return ""
     match = re.search(r"\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2}", texto)
     if match:
         fecha = match.group(0)
@@ -44,7 +50,7 @@ def limpiar_fecha(texto):
             return fecha
     return ""
 
-# -------- EXTRAER --------
+# -------- EXTRAER DATOS --------
 def extraer_datos(pdf):
     texto = ""
 
@@ -54,29 +60,25 @@ def extraer_datos(pdf):
             if t:
                 texto += t + "\n"
 
-    # -------- CAMPOS EXACTOS --------
+    # -------- CAMPOS --------
     cliente = buscar(r"Raz[oó]n Social\s*/\s*Nombres y Apellidos\s*:\s*(.+)", texto)
-
     ruc = buscar(r"RUC\s*:\s*(\d+)", texto)
-
     autorizacion = buscar(r"N[ÚU]MERO DE AUTORIZACI[ÓO]N\s*:\s*(\d+)", texto)
 
-    fecha_raw = buscar(r"FECHA.*?:\s*([0-9/\-]+)", texto)
+    fecha_raw = buscar(r"Fecha.*?:\s*([0-9/\-]+)", texto)
     fecha = limpiar_fecha(fecha_raw)
 
-    factura = buscar(r"\d{3}-\d{3}-\d{9}", texto)
+    factura = buscar(r"(\d{3}-\d{3}-\d{9})", texto)
 
     # -------- VALORES --------
     base_0 = limpiar_numero(buscar(r"0%\s*\$?\s*([\d\.,]+)", texto))
-    base_15 = limpiar_numero(buscar(r"(12%|15%)\s*\$?\s*([\d\.,]+)", texto))
 
-    # FIX base 15 porque regex devuelve 2 grupos
-    if isinstance(base_15, tuple):
-        base_15 = limpiar_numero(base_15[1])
+    # ✅ CORREGIDO (sin error de grupo)
+    base_15 = limpiar_numero(buscar(r"(?:12%|15%)\s*\$?\s*([\d\.,]+)", texto))
 
     propina = limpiar_numero(buscar(r"PROPINA\s*\$?\s*([\d\.,]+)", texto))
 
-    # IVA SOLO SI HAY BASE 15
+    # IVA solo si hay base 15
     iva = round(base_15 * 0.15, 2) if base_15 > 0 else 0
 
     return {
@@ -91,12 +93,12 @@ def extraer_datos(pdf):
         "BASE 15%": base_15,
         "PROPINA": propina,
         "IVA": iva,
-        "TOTAL": "",  # FORMULA
+        "TOTAL": "",
         "N° RETENCION": "NA",
         "10% R.FTE": "",
         "100% R. IVA": "",
         "TOTAL RETENCION": "",
-        "POR COBRAR": ""  # FORMULA
+        "POR COBRAR": ""
     }
 
 # -------- PROCESO --------
@@ -153,7 +155,6 @@ if uploaded_files:
     for i, row in enumerate(df.itertuples(index=False), start=3):
         ws.append(row)
 
-        # columnas
         col_base0 = headers.index("BASE 0%") + 1
         col_base15 = headers.index("BASE 15%") + 1
         col_propina = headers.index("PROPINA") + 1
@@ -161,17 +162,16 @@ if uploaded_files:
         col_total = headers.index("TOTAL") + 1
         col_pc = headers.index("POR COBRAR") + 1
 
-        # letras
         b0 = chr(64 + col_base0)
         b15 = chr(64 + col_base15)
         prop = chr(64 + col_propina)
         iva_l = chr(64 + col_iva)
         tot = chr(64 + col_total)
 
-        # FORMULA TOTAL
+        # TOTAL = suma
         ws.cell(row=i, column=col_total).value = f"={b0}{i}+{b15}{i}+{prop}{i}+{iva_l}{i}"
 
-        # FORMULA POR COBRAR
+        # POR COBRAR = TOTAL
         ws.cell(row=i, column=col_pc).value = f"={tot}{i}"
 
         for col in range(1, len(headers) + 1):
