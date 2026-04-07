@@ -3,6 +3,7 @@ import pandas as pd
 import pdfplumber
 import re
 from io import BytesIO
+from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Border, Side
 
@@ -14,24 +15,43 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# -------- FUNCIONES --------
-def limpiar_numero(valor):
-    if not valor:
+# -------- LIMPIAR NUMEROS --------
+def limpiar_numero(texto):
+    if not texto:
         return 0
-    valor = valor.replace(",", ".")
+    texto = texto.replace(",", ".")
     try:
-        return float(valor)
+        return float(re.findall(r"\d+\.\d+|\d+", texto)[0])
     except:
         return 0
 
-def buscar(patrones, texto):
-    for patron in patrones:
+# -------- LIMPIAR FECHA --------
+def limpiar_fecha(texto):
+    if not texto:
+        return ""
+    
+    match = re.search(r"\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2}", texto)
+    if match:
+        fecha_str = match.group(0)
+        try:
+            if "/" in fecha_str:
+                return datetime.strptime(fecha_str, "%d/%m/%Y").strftime("%d/%m/%Y")
+            else:
+                return datetime.strptime(fecha_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+        except:
+            return fecha_str
+    return ""
+
+# -------- BUSCAR FLEXIBLE --------
+def buscar(texto, palabras):
+    for palabra in palabras:
+        patron = rf"{palabra}.*?([\w\d\-/\.:]+)"
         match = re.search(patron, texto, re.IGNORECASE)
         if match:
             return match.group(1).strip()
     return ""
 
-# -------- EXTRACCION --------
+# -------- EXTRAER DATOS --------
 def extraer_datos(pdf):
     texto = ""
 
@@ -39,69 +59,35 @@ def extraer_datos(pdf):
         for page in pdf_file.pages:
             t = page.extract_text()
             if t:
-                texto += t + "\n"
+                texto += t + " "
 
-    # -------- CLIENTE --------
-    cliente = buscar([
-        r"Raz[oó]n Social\s*:\s*(.+)",
-        r"Cliente\s*:\s*(.+)"
-    ], texto)
+    # -------- CAMPOS --------
+    cliente = buscar(texto, ["Razón Social", "Cliente"])
+    ruc = buscar(texto, ["RUC", "Identificación"])
+    autorizacion = buscar(texto, ["Autorización", "Numero de Autorizacion"])
+    fecha_raw = buscar(texto, ["Fecha", "FECHA"])
+    factura = buscar(texto, ["Factura", "No.", "Comprobante"])
 
-    # -------- RUC --------
-    ruc = buscar([
-        r"R\.?U\.?C\.?\s*:\s*(\d{10,13})",
-        r"Identificaci[oó]n\s*:\s*(\d{10,13})"
-    ], texto)
+    fecha = limpiar_fecha(fecha_raw)
 
-    # -------- AUTORIZACION --------
-    autorizacion = buscar([
-        r"Autorizaci[oó]n\s*:\s*(\d+)",
-        r"N[úu]mero\s+de\s+Autorizaci[oó]n\s*:\s*(\d+)"
-    ], texto)
-
-    # -------- FECHA --------
-    fecha = buscar([
-        r"FECHA\s*Y\s*HORA\s*DE\s*AUTORIZACI[oó]N\s*:\s*([0-9/\-]+)",
-        r"Fecha\s*:\s*([0-9/\-]+)"
-    ], texto)
-
-    # -------- FACTURA --------
-    factura = buscar([
-        r"Factura\s*No\.?\s*:\s*([\d\-]+)",
-        r"No\.?\s*Factura\s*:\s*([\d\-]+)",
-        r"Comprobante\s*:\s*([\d\-]+)"
-    ], texto)
-
-    # -------- BASES --------
-    base_0 = limpiar_numero(buscar([
-        r"0%\s*\$?\s*([\d\.,]+)"
-    ], texto))
-
-    base_15 = limpiar_numero(buscar([
-        r"(?:12%|15%)\s*\$?\s*([\d\.,]+)"
-    ], texto))
+    # -------- VALORES --------
+    base_0 = limpiar_numero(buscar(texto, ["0%"]))
+    base_15 = limpiar_numero(buscar(texto, ["12%", "15%"]))
+    total = limpiar_numero(buscar(texto, ["TOTAL"]))
 
     # -------- IVA --------
-    if base_15 > 0:
-        iva = round(base_15 * 0.15, 2)
-    else:
-        iva = 0
+    iva = round(base_15 * 0.15, 2) if base_15 > 0 else 0
 
-    # -------- TOTAL --------
-    total = limpiar_numero(buscar([
-        r"TOTAL\s*\$?\s*([\d\.,]+)"
-    ], texto))
-
-    # fallback si no encuentra total
+    # fallback total
     if total == 0:
         total = base_0 + base_15 + iva
 
     return {
-        "FECHA": fecha,
-        "CLIENTE": cliente,
-        "RUC": ruc,
-        "FACT": factura,
-        "AUTORIZACION": autorizacion,
+        "FECHA": fecha if fecha else "N/A",
+        "CLIENTE": cliente if cliente else "N/A",
+        "RUC": ruc if ruc else "N/A",
+        "FACT": factura if factura else "N/A",
+        "AUTORIZACION": autorizacion if autorizacion else "N/A",
         "NO OBJETO": "",
         "EXCENTO IVA": "",
         "BASE 0%": base_0,
@@ -113,7 +99,7 @@ def extraer_datos(pdf):
         "10% R.FTE": "",
         "100% R. IVA": "",
         "TOTAL RETENCION": "",
-        "POR COBRAR": total  # ← IGUAL AL TOTAL
+        "POR COBRAR": total
     }
 
 # -------- PROCESO --------
