@@ -25,33 +25,26 @@ def limpiar_numero(texto):
     except:
         return 0
 
-# -------- LIMPIAR FECHA --------
+# -------- BUSCAR --------
+def buscar(patron, texto):
+    match = re.search(patron, texto, re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+# -------- FECHA --------
 def limpiar_fecha(texto):
-    if not texto:
-        return ""
-    
     match = re.search(r"\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2}", texto)
     if match:
-        fecha_str = match.group(0)
+        fecha = match.group(0)
         try:
-            if "/" in fecha_str:
-                return datetime.strptime(fecha_str, "%d/%m/%Y").strftime("%d/%m/%Y")
+            if "/" in fecha:
+                return datetime.strptime(fecha, "%d/%m/%Y").strftime("%d/%m/%Y")
             else:
-                return datetime.strptime(fecha_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+                return datetime.strptime(fecha, "%Y-%m-%d").strftime("%d/%m/%Y")
         except:
-            return fecha_str
+            return fecha
     return ""
 
-# -------- BUSCAR FLEXIBLE --------
-def buscar(texto, palabras):
-    for palabra in palabras:
-        patron = rf"{palabra}.*?([\w\d\-/\.:]+)"
-        match = re.search(patron, texto, re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-    return ""
-
-# -------- EXTRAER DATOS --------
+# -------- EXTRAER --------
 def extraer_datos(pdf):
     texto = ""
 
@@ -59,47 +52,51 @@ def extraer_datos(pdf):
         for page in pdf_file.pages:
             t = page.extract_text()
             if t:
-                texto += t + " "
+                texto += t + "\n"
 
-    # -------- CAMPOS --------
-    cliente = buscar(texto, ["Razón Social", "Cliente"])
-    ruc = buscar(texto, ["RUC", "Identificación"])
-    autorizacion = buscar(texto, ["Autorización", "Numero de Autorizacion"])
-    fecha_raw = buscar(texto, ["Fecha", "FECHA"])
-    factura = buscar(texto, ["Factura", "No.", "Comprobante"])
+    # -------- CAMPOS EXACTOS --------
+    cliente = buscar(r"Raz[oó]n Social\s*/\s*Nombres y Apellidos\s*:\s*(.+)", texto)
 
+    ruc = buscar(r"RUC\s*:\s*(\d+)", texto)
+
+    autorizacion = buscar(r"N[ÚU]MERO DE AUTORIZACI[ÓO]N\s*:\s*(\d+)", texto)
+
+    fecha_raw = buscar(r"FECHA.*?:\s*([0-9/\-]+)", texto)
     fecha = limpiar_fecha(fecha_raw)
 
-    # -------- VALORES --------
-    base_0 = limpiar_numero(buscar(texto, ["0%"]))
-    base_15 = limpiar_numero(buscar(texto, ["12%", "15%"]))
-    total = limpiar_numero(buscar(texto, ["TOTAL"]))
+    factura = buscar(r"\d{3}-\d{3}-\d{9}", texto)
 
-    # -------- IVA --------
+    # -------- VALORES --------
+    base_0 = limpiar_numero(buscar(r"0%\s*\$?\s*([\d\.,]+)", texto))
+    base_15 = limpiar_numero(buscar(r"(12%|15%)\s*\$?\s*([\d\.,]+)", texto))
+
+    # FIX base 15 porque regex devuelve 2 grupos
+    if isinstance(base_15, tuple):
+        base_15 = limpiar_numero(base_15[1])
+
+    propina = limpiar_numero(buscar(r"PROPINA\s*\$?\s*([\d\.,]+)", texto))
+
+    # IVA SOLO SI HAY BASE 15
     iva = round(base_15 * 0.15, 2) if base_15 > 0 else 0
 
-    # fallback total
-    if total == 0:
-        total = base_0 + base_15 + iva
-
     return {
-        "FECHA": fecha if fecha else "N/A",
-        "CLIENTE": cliente if cliente else "N/A",
-        "RUC": ruc if ruc else "N/A",
-        "FACT": factura if factura else "N/A",
-        "AUTORIZACION": autorizacion if autorizacion else "N/A",
+        "FECHA": fecha,
+        "CLIENTE": cliente,
+        "RUC": ruc,
+        "FACT": factura,
+        "AUTORIZACION": autorizacion,
         "NO OBJETO": "",
         "EXCENTO IVA": "",
         "BASE 0%": base_0,
         "BASE 15%": base_15,
-        "PROPINA": "",
+        "PROPINA": propina,
         "IVA": iva,
-        "TOTAL": total,
+        "TOTAL": "",  # FORMULA
         "N° RETENCION": "NA",
         "10% R.FTE": "",
         "100% R. IVA": "",
         "TOTAL RETENCION": "",
-        "POR COBRAR": total
+        "POR COBRAR": ""  # FORMULA
     }
 
 # -------- PROCESO --------
@@ -152,14 +149,35 @@ if uploaded_files:
         if col_name == "POR COBRAR":
             cell.fill = verde
 
-    # DATOS
+    # -------- DATOS + FORMULAS --------
     for i, row in enumerate(df.itertuples(index=False), start=3):
         ws.append(row)
+
+        # columnas
+        col_base0 = headers.index("BASE 0%") + 1
+        col_base15 = headers.index("BASE 15%") + 1
+        col_propina = headers.index("PROPINA") + 1
+        col_iva = headers.index("IVA") + 1
+        col_total = headers.index("TOTAL") + 1
+        col_pc = headers.index("POR COBRAR") + 1
+
+        # letras
+        b0 = chr(64 + col_base0)
+        b15 = chr(64 + col_base15)
+        prop = chr(64 + col_propina)
+        iva_l = chr(64 + col_iva)
+        tot = chr(64 + col_total)
+
+        # FORMULA TOTAL
+        ws.cell(row=i, column=col_total).value = f"={b0}{i}+{b15}{i}+{prop}{i}+{iva_l}{i}"
+
+        # FORMULA POR COBRAR
+        ws.cell(row=i, column=col_pc).value = f"={tot}{i}"
 
         for col in range(1, len(headers) + 1):
             ws.cell(row=i, column=col).border = borde
 
-    # TOTAL
+    # -------- TOTAL FINAL --------
     fila_total = len(df) + 3
     ws.cell(row=fila_total, column=1, value="TOTAL")
 
@@ -173,7 +191,7 @@ if uploaded_files:
         cell.fill = amarillo
         cell.border = borde
 
-    # DESCARGA
+    # -------- DESCARGA --------
     output = BytesIO()
     wb.save(output)
     output.seek(0)
