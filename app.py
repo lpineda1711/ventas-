@@ -63,25 +63,30 @@ def extraer_datos(pdf):
         r"Raz[oó]n Social\s*:\s*(.+)"
     ], texto)
 
-    # -------- RUC --------
+    # -------- RUC (ROBUSTO) --------
     ruc = buscar_multiple([
-        r"RUC\s*:\s*(\d+)",
-        r"Identificaci[oó]n\s*:\s*(\d+)"
+        r"R\.?U\.?C\.?\s*:\s*(\d{10,13})",
+        r"Identificaci[oó]n\s*:\s*(\d{10,13})",
+        r"RUC\s*No\.?\s*:\s*(\d{10,13})"
     ], texto)
 
-    # -------- AUTORIZACION (MUY IMPORTANTE) --------
+    if not ruc:
+        posible_ruc = re.findall(r"\b\d{13}\b", texto)
+        if posible_ruc:
+            ruc = posible_ruc[0]
+
+    # -------- AUTORIZACION --------
     autorizacion = buscar_multiple([
         r"N[ÚU]MERO DE AUTORIZACI[ÓO]N\s*:\s*(\d+)",
         r"Autorizaci[oó]n\s*:\s*(\d{10,})",
         r"Clave de Acceso\s*:\s*(\d{20,})"
     ], texto)
 
-    # -------- FECHA (VARIAS FORMAS) --------
+    # -------- FECHA --------
     fecha_raw = buscar_multiple([
         r"Fecha de Emisi[oó]n\s*:\s*([0-9/\-]+)",
         r"FECHA\s*:\s*([0-9/\-]+)",
-        r"Fecha\s*:\s*([0-9/\-]+)",
-        r"Autorizaci[oó]n.*?([0-9]{2}/[0-9]{2}/[0-9]{4})"
+        r"Fecha\s*:\s*([0-9/\-]+)"
     ], texto)
 
     fecha = limpiar_fecha(fecha_raw)
@@ -112,7 +117,7 @@ def extraer_datos(pdf):
     return {
         "FECHA": fecha if fecha else "NO DETECTADO",
         "CLIENTE": cliente if cliente else "NO DETECTADO",
-        "RUC": ruc,
+        "RUC": ruc if ruc else "NO DETECTADO",
         "FACT": factura if factura else "NO DETECTADO",
         "AUTORIZACION": autorizacion if autorizacion else "NO DETECTADO",
         "NO OBJETO": "",
