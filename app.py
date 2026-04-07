@@ -6,7 +6,7 @@ from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Border, Side
 
-st.title("📊 Ventas SRI - Formato PRO")
+st.title("📊 Ventas SRI - Formato PRO FINAL")
 
 uploaded_files = st.file_uploader(
     "Sube facturas PDF",
@@ -14,11 +14,21 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# -------- FUNCION MEJORADA --------
-def buscar(patron, texto):
-    match = re.search(patron, texto, re.IGNORECASE | re.DOTALL)
-    return match.group(1).strip() if match else ""
+# -------- LIMPIAR TEXTO --------
+def limpiar_texto(texto):
+    texto = texto.replace("\n", " ")
+    texto = re.sub(r"\s+", " ", texto)
+    return texto
 
+# -------- BUSCAR MULTIPLE --------
+def buscar_multiple(patrones, texto):
+    for patron in patrones:
+        match = re.search(patron, texto, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+# -------- EXTRAER DATOS --------
 def extraer_datos(pdf):
     texto = ""
 
@@ -26,37 +36,46 @@ def extraer_datos(pdf):
         for page in pdf_file.pages:
             t = page.extract_text()
             if t:
-                texto += t + "\n"
+                texto += t + " "
 
-    # -------- EXTRACCIONES ROBUSTAS --------
+    texto = limpiar_texto(texto)
 
     # CLIENTE
-    cliente = buscar(r"Raz[oó]n Social.*?:\s*(.+)", texto)
+    cliente = buscar_multiple([
+        r"Raz[oó]n Social.*?:\s*(.*?)\s{2,}"
+    ], texto)
 
     # RUC
-    ruc = buscar(r"R\.?U\.?C\.?\s*:\s*(\d{10,13})", texto)
+    ruc = buscar_multiple([
+        r"R\.?U\.?C\.?\s*:\s*(\d{10,13})"
+    ], texto)
 
-    # AUTORIZACION (MUY IMPORTANTE - VARIAS FORMAS)
-    autorizacion = buscar(r"(?:N[úu]mero\s+de\s+Autorizaci[oó]n|Autorizaci[oó]n)\s*:\s*(\d{10,})", texto)
+    # AUTORIZACION
+    autorizacion = buscar_multiple([
+        r"N[ÚU]MERO DE AUTORIZACI[ÓO]N\s*:\s*(\d+)",
+        r"AUTORIZACI[ÓO]N\s*:\s*(\d+)"
+    ], texto)
 
-    # FECHA (solo fecha, ignora hora)
-    fecha_raw = buscar(r"FECHA\s+Y\s+HORA\s+DE\s+AUTORIZACI[oó]N\s*:\s*([0-9/\-]+)", texto)
+    # FECHA (solo fecha)
+    fecha = buscar_multiple([
+        r"FECHA Y HORA DE AUTORIZACI[ÓO]N\s*:\s*(\d{2}/\d{2}/\d{4})",
+        r"FECHA DE AUTORIZACI[ÓO]N\s*:\s*(\d{2}/\d{2}/\d{4})"
+    ], texto)
 
-    # LIMPIAR FECHA
-    fecha = ""
-    if fecha_raw:
-        fecha = fecha_raw.split()[0]
-
-    # FACTURA (varios formatos posibles)
-    factura = buscar(r"(?:Factura|No\.?\s*Factura|Comprobante)\s*[:#]?\s*(\d{3}-\d{3}-\d+)", texto)
+    # FACTURA
+    factura = buscar_multiple([
+        r"No\.?\s*[:\-]?\s*(\d{3}-\d{3}-\d+)",
+        r"FACTURA\s*No\.?\s*(\d{3}-\d{3}-\d+)",
+        r"COMPROBANTE\s*No\.?\s*(\d{3}-\d{3}-\d+)"
+    ], texto)
 
     # BASES
-    base_0 = buscar(r"0%\s*.*?(\d+\.\d+)", texto)
-    base_15 = buscar(r"(?:12%|15%)\s*.*?(\d+\.\d+)", texto)
+    base_0 = buscar_multiple([r"0%\s*.*?(\d+\.\d+)"], texto)
+    base_15 = buscar_multiple([r"(?:12%|15%)\s*.*?(\d+\.\d+)"], texto)
 
-    # IVA y TOTAL
-    iva = buscar(r"IVA\s*.*?(\d+\.\d+)", texto)
-    total = buscar(r"TOTAL\s*.*?(\d+\.\d+)", texto)
+    # IVA Y TOTAL
+    iva = buscar_multiple([r"IVA\s*.*?(\d+\.\d+)"], texto)
+    total = buscar_multiple([r"TOTAL\s*.*?(\d+\.\d+)"], texto)
 
     return {
         "FECHA": fecha,
@@ -78,6 +97,7 @@ def extraer_datos(pdf):
         "POR COBRAR": ""
     }
 
+# -------- PROCESO --------
 if uploaded_files:
     data = []
 
@@ -102,9 +122,9 @@ if uploaded_files:
     ws.append(headers)
 
     # COLORES
-    amarillo = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-    azul = PatternFill(start_color="00B0F0", end_color="00B0F0", fill_type="solid")
-    verde = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
+    amarillo = PatternFill(start_color="FFFF00", fill_type="solid")
+    azul = PatternFill(start_color="00B0F0", fill_type="solid")
+    verde = PatternFill(start_color="92D050", fill_type="solid")
 
     # BORDES
     borde = Border(
@@ -138,8 +158,8 @@ if uploaded_files:
         col_total = headers.index("TOTAL") + 1
         col_pc = headers.index("POR COBRAR") + 1
 
-        letra_total = chr(64 + col_total)
-        ws.cell(row=i, column=col_pc).value = f"={letra_total}{i}"
+        letra = chr(64 + col_total)
+        ws.cell(row=i, column=col_pc).value = f"={letra}{i}"
 
     # FILA TOTAL
     fila_total = len(df) + 3
