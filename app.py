@@ -4,9 +4,9 @@ import pdfplumber
 import re
 from io import BytesIO
 from openpyxl import Workbook
-from openpyxl.styles import PatternFill, Font
+from openpyxl.styles import PatternFill, Font, Border, Side
 
-st.title("📊 Ventas SRI - Formato Oficial")
+st.title("📊 Ventas SRI - Formato PRO")
 
 uploaded_files = st.file_uploader(
     "Sube facturas PDF",
@@ -23,10 +23,15 @@ def extraer_datos(pdf):
             if contenido:
                 texto += contenido + "\n"
 
-    # CAMPOS
+    # -------- EXTRACCIÓN --------
     cliente = re.search(r"Raz[oó]n Social.*?:\s*(.*)", texto, re.IGNORECASE)
     ruc = re.search(r"R\.?U\.?C\.?:\s*(\d+)", texto)
     autorizacion = re.search(r"N[ÚU]MERO DE AUTORIZACI[ÓO]N\s*:\s*(\d+)", texto)
+
+    # FECHA (solo fecha sin hora)
+    fecha = re.search(r"FECHA Y HORA DE AUTORIZACI[ÓO]N\s*:\s*([\d/]+)", texto)
+
+    # FACTURA
     factura = re.search(r"Factura.*?(\d{3}-\d{3}-\d+)", texto)
 
     base_0 = re.search(r"0%.*?(\d+\.\d+)", texto)
@@ -35,7 +40,7 @@ def extraer_datos(pdf):
     total = re.search(r"TOTAL.*?(\d+\.\d+)", texto)
 
     return {
-        "FECHA": "",
+        "FECHA": fecha.group(1) if fecha else "",
         "CLIENTE": cliente.group(1).strip() if cliente else "",
         "RUC": ruc.group(1) if ruc else "",
         "FACT": factura.group(1) if factura else "",
@@ -51,7 +56,7 @@ def extraer_datos(pdf):
         "10% R.FTE": "",
         "100% R. IVA": "",
         "TOTAL RETENCION": "",
-        "POR COBRAR": ""  # se llena con fórmula luego
+        "POR COBRAR": ""
     }
 
 if uploaded_files:
@@ -66,29 +71,38 @@ if uploaded_files:
     df = pd.DataFrame(data)
     st.dataframe(df)
 
-    # -------- EXCEL --------
+    # -------- CREAR EXCEL --------
     wb = Workbook()
     ws = wb.active
     ws.title = "VENTAS FEBRERO"
 
     headers = list(df.columns)
 
-    # FILA TÍTULO
+    # TÍTULO
     ws["A1"] = "VENTAS FEBRERO"
 
     # ENCABEZADOS
     ws.append(headers)
 
-    # COLORES
+    # -------- COLORES --------
     amarillo = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
     azul = PatternFill(start_color="00B0F0", end_color="00B0F0", fill_type="solid")
     verde = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
 
-    # PINTAR ENCABEZADOS
+    # -------- BORDES --------
+    borde = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin")
+    )
+
+    # ENCABEZADOS CON COLOR Y BORDE
     for col_num, col_name in enumerate(headers, 1):
         cell = ws.cell(row=2, column=col_num)
         cell.fill = amarillo
         cell.font = Font(bold=True)
+        cell.border = borde
 
         if col_name in ["N° RETENCION", "10% R.FTE", "100% R. IVA", "TOTAL RETENCION"]:
             cell.fill = azul
@@ -96,17 +110,21 @@ if uploaded_files:
         if col_name == "POR COBRAR":
             cell.fill = verde
 
-    # AGREGAR DATOS
+    # -------- DATOS --------
     for i, row in enumerate(df.itertuples(index=False), start=3):
         ws.append(row)
 
-        # FORMULA POR COBRAR = TOTAL
+        for col in range(1, len(headers) + 1):
+            ws.cell(row=i, column=col).border = borde
+
+        # FORMULA POR COBRAR
         col_total = headers.index("TOTAL") + 1
-        col_por_cobrar = headers.index("POR COBRAR") + 1
+        col_pc = headers.index("POR COBRAR") + 1
 
-        ws.cell(row=i, column=col_por_cobrar).value = f"={chr(64+col_total)}{i}"
+        letra_total = chr(64 + col_total)
+        ws.cell(row=i, column=col_pc).value = f"={letra_total}{i}"
 
-    # -------- FILA DE TOTALES --------
+    # -------- FILA TOTAL --------
     fila_total = len(df) + 3
     ws.cell(row=fila_total, column=1, value="TOTAL")
 
@@ -116,17 +134,19 @@ if uploaded_files:
 
         ws.cell(row=fila_total, column=col_index).value = f"=SUM({letra}3:{letra}{fila_total-1})"
 
-    # PINTAR FILA TOTAL
+    # COLOR + BORDE FILA TOTAL
     for col in range(1, len(headers) + 1):
-        ws.cell(row=fila_total, column=col).fill = amarillo
+        cell = ws.cell(row=fila_total, column=col)
+        cell.fill = amarillo
+        cell.border = borde
 
-    # DESCARGA
+    # -------- DESCARGA --------
     output = BytesIO()
     wb.save(output)
     output.seek(0)
 
     st.download_button(
-        "📥 Descargar Excel Formato SRI",
+        "📥 Descargar Excel PRO",
         data=output,
         file_name="ventas_febrero.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
