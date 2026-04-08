@@ -28,14 +28,21 @@ def limpiar_numero(texto):
 # -------- BUSCAR MULTIPLE --------
 def buscar_multiple(patrones, texto):
     for patron in patrones:
-        match = re.search(patron, texto, re.IGNORECASE)
+        match = re.search(patron, texto, re.IGNORECASE | re.DOTALL)
         if match:
             return match.group(match.lastindex or 0).strip()
     return ""
 
 # -------- LIMPIAR FECHA --------
 def limpiar_fecha(texto):
-    match = re.search(r"\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2}", texto)
+    if not texto:
+        return ""
+
+    match = re.search(
+        r"\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2}",
+        texto
+    )
+
     if match:
         fecha = match.group(0)
         try:
@@ -45,6 +52,7 @@ def limpiar_fecha(texto):
                 return datetime.strptime(fecha, "%Y-%m-%d").strftime("%d/%m/%Y")
         except:
             return fecha
+
     return ""
 
 # -------- EXTRAER DATOS --------
@@ -63,11 +71,10 @@ def extraer_datos(pdf):
         r"Raz[oó]n Social\s*:\s*(.+)"
     ], texto)
 
-    # -------- RUC (ROBUSTO) --------
+    # -------- RUC --------
     ruc = buscar_multiple([
         r"R\.?U\.?C\.?\s*:\s*(\d{10,13})",
-        r"Identificaci[oó]n\s*:\s*(\d{10,13})",
-        r"RUC\s*No\.?\s*:\s*(\d{10,13})"
+        r"Identificaci[oó]n\s*:\s*(\d{10,13})"
     ], texto)
 
     if not ruc:
@@ -75,19 +82,32 @@ def extraer_datos(pdf):
         if posible_ruc:
             ruc = posible_ruc[0]
 
-    # -------- AUTORIZACION --------
+    # -------- AUTORIZACION (MEGA ROBUSTO) --------
     autorizacion = buscar_multiple([
-        r"N[ÚU]MERO DE AUTORIZACI[ÓO]N\s*:\s*(\d+)",
+        r"N[ÚU]MERO\s+DE\s+AUTORIZACI[ÓO]N\s*:\s*(\d+)",
         r"Autorizaci[oó]n\s*:\s*(\d{10,})",
-        r"Clave de Acceso\s*:\s*(\d{20,})"
+        r"Clave\s+de\s+Acceso\s*:\s*(\d{20,})",
+        r"CLAVE\s+DE\s+ACCESO\s*:\s*(\d{20,})"
     ], texto)
 
-    # -------- FECHA --------
+    # fallback: buscar número largo (clave acceso)
+    if not autorizacion:
+        posibles = re.findall(r"\b\d{20,49}\b", texto)
+        if posibles:
+            autorizacion = posibles[0]
+
+    # -------- FECHA (MEGA ROBUSTO) --------
     fecha_raw = buscar_multiple([
-        r"Fecha de Emisi[oó]n\s*:\s*([0-9/\-]+)",
-        r"FECHA\s*:\s*([0-9/\-]+)",
+        r"Fecha\s+de\s+Emisi[oó]n\s*:\s*([0-9/\-]+)",
+        r"FECHA\s*Y\s*HORA\s*DE\s*AUTORIZACI[ÓO]N\s*:\s*([0-9/\-]+)",
         r"Fecha\s*:\s*([0-9/\-]+)"
     ], texto)
+
+    # fallback: buscar cualquier fecha
+    if not fecha_raw:
+        posibles = re.findall(r"\d{2}/\d{2}/\d{4}", texto)
+        if posibles:
+            fecha_raw = posibles[0]
 
     fecha = limpiar_fecha(fecha_raw)
 
@@ -158,9 +178,9 @@ if uploaded_files:
     ws["A1"] = "VENTAS FEBRERO"
     ws.append(headers)
 
-    amarillo = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-    azul = PatternFill(start_color="00B0F0", end_color="00B0F0", fill_type="solid")
-    verde = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
+    amarillo = PatternFill(start_color="FFFF00", fill_type="solid")
+    azul = PatternFill(start_color="00B0F0", fill_type="solid")
+    verde = PatternFill(start_color="92D050", fill_type="solid")
 
     borde = Border(
         left=Side(style="thin"),
@@ -199,7 +219,6 @@ if uploaded_files:
         for col in range(1, len(headers) + 1):
             ws.cell(row=i, column=col).border = borde
 
-    # DESCARGA
     output = BytesIO()
     wb.save(output)
     output.seek(0)
