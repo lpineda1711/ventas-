@@ -42,15 +42,7 @@ def limpiar_cliente(nombre):
 
 # -------- LIMPIAR FECHA --------
 def limpiar_fecha(texto):
-    if not texto:
-        return ""
-
-    # detecta varias fechas posibles
-    match = re.search(
-        r"\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2}",
-        texto
-    )
-
+    match = re.search(r"\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2}", texto)
     if match:
         fecha = match.group(0)
         try:
@@ -60,7 +52,6 @@ def limpiar_fecha(texto):
                 return datetime.strptime(fecha, "%Y-%m-%d").strftime("%d/%m/%Y")
         except:
             return fecha
-
     return ""
 
 # -------- EXTRAER DATOS --------
@@ -73,58 +64,51 @@ def extraer_datos(pdf):
             if t:
                 texto += t + "\n"
 
-    # -------- CLIENTE --------
+    # CLIENTE
     cliente_raw = buscar_multiple([
         r"Raz[oó]n Social\s*/\s*Nombres y Apellidos\s*:\s*(.+)",
         r"Raz[oó]n Social\s*:\s*(.+)"
     ], texto)
-
     cliente = limpiar_cliente(cliente_raw)
 
-    # -------- RUC --------
+    # RUC
     ruc = buscar_multiple([
         r"R\.?U\.?C\.?\s*:\s*(\d{10,13})",
         r"Identificaci[oó]n\s*:\s*(\d{10,13})"
     ], texto)
-
     if not ruc:
         posibles = re.findall(r"\b\d{13}\b", texto)
         if posibles:
             ruc = posibles[0]
 
-    # -------- AUTORIZACION --------
+    # AUTORIZACION
     autorizacion = buscar_multiple([
         r"N[ÚU]MERO\s+DE\s+AUTORIZACI[ÓO]N\s*:\s*(\d+)",
         r"Clave\s+de\s+Acceso\s*:\s*(\d{20,})"
     ], texto)
-
     if not autorizacion:
         posibles = re.findall(r"\b\d{20,49}\b", texto)
         if posibles:
             autorizacion = posibles[0]
 
-    # -------- FECHA (ULTRA ROBUSTA) --------
+    # FECHA
     fecha_raw = buscar_multiple([
         r"Fecha\s+de\s+Emisi[oó]n\s*:\s*([0-9/\-]+)",
-        r"FECHA\s+Y\s+HORA\s+DE\s+AUTORIZACI[ÓO]N\s*:\s*([0-9/\-]+)",
-        r"Fecha\s*:\s*([0-9/\-]+)"
+        r"FECHA.*?:\s*([0-9/\-]+)"
     ], texto)
-
-    # 🔥 fallback definitivo
     if not fecha_raw:
         posibles = re.findall(r"\d{2}/\d{2}/\d{4}", texto)
         if posibles:
             fecha_raw = posibles[0]
-
     fecha = limpiar_fecha(fecha_raw)
 
-    # -------- FACTURA --------
+    # FACTURA
     factura = buscar_multiple([
         r"Factura\s*No\.?\s*:\s*([\d\-]+)",
         r"(\d{3}-\d{3}-\d{9})"
     ], texto)
 
-    # -------- VALORES --------
+    # VALORES
     base_0 = limpiar_numero(buscar_multiple([r"0%\s*\$?\s*([\d\.,]+)"], texto))
     base_15 = limpiar_numero(buscar_multiple([r"(?:12%|15%)\s*\$?\s*([\d\.,]+)"], texto))
     propina = limpiar_numero(buscar_multiple([r"PROPINA\s*\$?\s*([\d\.,]+)"], texto))
@@ -154,7 +138,6 @@ def extraer_datos(pdf):
 # -------- PROCESO --------
 if uploaded_files:
     data = []
-
     for file in uploaded_files:
         try:
             data.append(extraer_datos(file))
@@ -164,7 +147,7 @@ if uploaded_files:
     df = pd.DataFrame(data)
     st.dataframe(df)
 
-    # -------- EXCEL --------
+    # EXCEL
     wb = Workbook()
     ws = wb.active
     ws.title = "VENTAS FEBRERO"
@@ -189,7 +172,6 @@ if uploaded_files:
         cell.fill = amarillo
         cell.font = Font(bold=True)
         cell.border = borde
-
         if col_name == "POR COBRAR":
             cell.fill = verde
 
@@ -204,7 +186,10 @@ if uploaded_files:
         tot = chr(64 + headers.index("TOTAL") + 1)
         pc = chr(64 + headers.index("POR COBRAR") + 1)
 
+        # ✅ TOTAL = SUMA
         ws[f"{tot}{i}"] = f"={b0}{i}+{b15}{i}+{prop}{i}+{iva_l}{i}"
+
+        # ✅ POR COBRAR = TOTAL
         ws[f"{pc}{i}"] = f"={tot}{i}"
 
         for col in range(1, len(headers) + 1):
