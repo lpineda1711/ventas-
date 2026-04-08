@@ -37,13 +37,20 @@ def buscar_multiple(patrones, texto):
 def limpiar_cliente(nombre):
     if not nombre:
         return ""
-    # corta si se pasa a otra etiqueta
     nombre = re.split(r"RUC|Identificaci[oó]n|Direcci[oó]n|Tel[eé]fono", nombre)[0]
     return nombre.strip()
 
 # -------- LIMPIAR FECHA --------
 def limpiar_fecha(texto):
-    match = re.search(r"\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2}", texto)
+    if not texto:
+        return ""
+
+    # detecta varias fechas posibles
+    match = re.search(
+        r"\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2}",
+        texto
+    )
+
     if match:
         fecha = match.group(0)
         try:
@@ -53,6 +60,7 @@ def limpiar_fecha(texto):
                 return datetime.strptime(fecha, "%Y-%m-%d").strftime("%d/%m/%Y")
         except:
             return fecha
+
     return ""
 
 # -------- EXTRAER DATOS --------
@@ -65,7 +73,7 @@ def extraer_datos(pdf):
             if t:
                 texto += t + "\n"
 
-    # -------- CLIENTE (LIMPIO) --------
+    # -------- CLIENTE --------
     cliente_raw = buscar_multiple([
         r"Raz[oó]n Social\s*/\s*Nombres y Apellidos\s*:\s*(.+)",
         r"Raz[oó]n Social\s*:\s*(.+)"
@@ -95,12 +103,14 @@ def extraer_datos(pdf):
         if posibles:
             autorizacion = posibles[0]
 
-    # -------- FECHA --------
+    # -------- FECHA (ULTRA ROBUSTA) --------
     fecha_raw = buscar_multiple([
         r"Fecha\s+de\s+Emisi[oó]n\s*:\s*([0-9/\-]+)",
-        r"FECHA.*?:\s*([0-9/\-]+)"
+        r"FECHA\s+Y\s+HORA\s+DE\s+AUTORIZACI[ÓO]N\s*:\s*([0-9/\-]+)",
+        r"Fecha\s*:\s*([0-9/\-]+)"
     ], texto)
 
+    # 🔥 fallback definitivo
     if not fecha_raw:
         posibles = re.findall(r"\d{2}/\d{2}/\d{4}", texto)
         if posibles:
@@ -164,7 +174,6 @@ if uploaded_files:
     ws.append(headers)
 
     amarillo = PatternFill(start_color="FFFF00", fill_type="solid")
-    azul = PatternFill(start_color="00B0F0", fill_type="solid")
     verde = PatternFill(start_color="92D050", fill_type="solid")
 
     borde = Border(
@@ -195,10 +204,7 @@ if uploaded_files:
         tot = chr(64 + headers.index("TOTAL") + 1)
         pc = chr(64 + headers.index("POR COBRAR") + 1)
 
-        # TOTAL = suma
         ws[f"{tot}{i}"] = f"={b0}{i}+{b15}{i}+{prop}{i}+{iva_l}{i}"
-
-        # POR COBRAR = TOTAL
         ws[f"{pc}{i}"] = f"={tot}{i}"
 
         for col in range(1, len(headers) + 1):
