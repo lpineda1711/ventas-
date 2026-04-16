@@ -15,6 +15,21 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
+# -------- FUNCION PARA OBTENER MES --------
+def obtener_mes(fechas):
+    for f in fechas:
+        try:
+            fecha = datetime.strptime(f, "%d/%m/%Y")
+            meses = [
+                "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+                "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
+            ]
+            return meses[fecha.month - 1]
+        except:
+            continue
+    return "MES"
+
+# -------- FUNCIONES EXISTENTES --------
 def limpiar_numero(texto):
     if not texto:
         return 0
@@ -134,6 +149,7 @@ def extraer_datos(pdf):
         "POR COBRAR": ""
     }
 
+# -------- PROCESAMIENTO --------
 if uploaded_files:
     data = []
 
@@ -146,12 +162,16 @@ if uploaded_files:
     df = pd.DataFrame(data)
     st.dataframe(df)
 
+    # -------- TITULO DINAMICO --------
+    mes = obtener_mes(df["FECHA"])
+    titulo = f"VENTAS {mes}"
+
     wb = Workbook()
     ws = wb.active
-    ws.title = "VENTAS FEBRERO"
+    ws.title = titulo
 
     headers = list(df.columns)
-    ws["A1"] = "VENTAS FEBRERO"
+    ws["A1"] = titulo
     ws.append(headers)
 
     amarillo = PatternFill(start_color="FFFF00", fill_type="solid")
@@ -200,7 +220,6 @@ if uploaded_files:
         col_letter = chr(64 + headers.index(col_name) + 1)
         ws[f"{col_letter}{total_row}"] = f"=SUM({col_letter}3:{col_letter}{total_row-1})"
 
-    # PINTAR FILA TOTAL
     for col in range(1, len(headers) + 1):
         cell = ws.cell(row=total_row, column=col)
         cell.fill = amarillo
@@ -214,6 +233,6 @@ if uploaded_files:
     st.download_button(
         "📥 Descargar Excel FINAL",
         data=output,
-        file_name="ventas.xlsx",
+        file_name=f"ventas_{mes.lower()}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
